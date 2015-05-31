@@ -114,12 +114,12 @@ impl Handler for PtpReflectorHandler {
         let forward = match domain {
             0 => {
                 msg[4] = 1;
-                vector_map_range_in_place(&mut msg, Range {start:20, end:28}, |&x| x ^ 0xff);
+                vector_map_range_in_place(&mut msg, 20..28, |&x| x ^ 0xff);
 
                 match msg_type {
                     0x0 | 0x08 | 0xb       => true,
                     0x9 if msg.len() >= 54 => {
-                        vector_map_range_in_place(&mut msg, Range {start:44, end:52}, |&x| x ^ 0xff);
+                        vector_map_range_in_place(&mut msg, 44..52, |&x| x ^ 0xff);
 
                         true
                     },
@@ -128,7 +128,7 @@ impl Handler for PtpReflectorHandler {
             },
             1 => {
                 msg[4] = 0;
-                vector_map_range_in_place(&mut msg, Range {start:20, end:28}, |&x| x ^ 0xff);
+                vector_map_range_in_place(&mut msg, 20..28, |&x| x ^ 0xff);
 
                 match msg_type {
                     0x1 => true,
