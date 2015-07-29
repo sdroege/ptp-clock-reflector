@@ -3,6 +3,13 @@ name = "ptp-clock-reflector"
 version = "0.1.0"
 authors = ["Sebastian Dröge <sebastian@centricular.com>"]
 
-[dependencies.mio]
-git = "https://github.com/carllerche/mio"
+[dependencies]
+mio = "0.4.1"
+bytes = "0.2.10"
+
+#[dependencies.bytes]
+#git = "https://github.com/carllerche/bytes"
+
+#[dependencies.mio]
+#git = "https://github.com/carllerche/mio"
 

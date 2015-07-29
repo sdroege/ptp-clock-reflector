@@ -17,10 +17,11 @@
  * Boston, MA 02110-1301, USA.
  */
 
+extern crate bytes;
 extern crate mio;
 
+use bytes::{ByteBuf};
 use mio::*;
-use mio::buf::{ByteBuf};
 use mio::udp::*;
 use std::net::{SocketAddr};
 use std::ops::{Range};
@@ -55,7 +56,7 @@ impl PtpReflectorHandler {
         let event_bind_addr = "0.0.0.0:319".parse().unwrap();
         let event_socket = try!(UdpSocket::bound(&event_bind_addr).map_err(|e| e.to_string()));
         try!(event_socket.join_multicast(&multicast_group).map_err(|e|e.to_string()));
-        try!(event_loop.register_opt(&event_socket, SOCKET_EVENT, Interest::readable(), PollOpt::level()).map_err(|e| e.to_string()));
+        try!(event_loop.register_opt(&event_socket, SOCKET_EVENT, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         //let event_addr = SocketAddr::new(multicast_group, 319);
@@ -64,7 +65,7 @@ impl PtpReflectorHandler {
         let general_bind_addr = "0.0.0.0:320".parse().unwrap();
         let general_socket = try!(UdpSocket::bound(&general_bind_addr).map_err(|e| e.to_string()));
         try!(general_socket.join_multicast(&multicast_group).map_err(|e|e.to_string()));
-        try!(event_loop.register_opt(&general_socket, SOCKET_GENERAL, Interest::readable(), PollOpt::level()).map_err(|e| e.to_string()));
+        try!(event_loop.register_opt(&general_socket, SOCKET_GENERAL, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         //let general_addr = SocketAddr::new(multicast_group, 320);
@@ -83,7 +84,11 @@ impl Handler for PtpReflectorHandler {
     type Timeout = usize;
     type Message = ();
 
-    fn readable(&mut self, _: &mut EventLoop<PtpReflectorHandler>, token: Token, _: ReadHint) {
+    fn ready(&mut self, _: &mut EventLoop<PtpReflectorHandler>, token: Token, events: EventSet) {
+        if !events.is_readable() {
+            return;
+        }
+
         let (socket, addr) = match token {
             SOCKET_EVENT   => (&self.event_socket, &self.event_addr),
             SOCKET_GENERAL => (&self.general_socket, &self.general_addr),
