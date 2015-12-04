@@ -17,10 +17,8 @@
  * Boston, MA 02110-1301, USA.
  */
 
-extern crate bytes;
 extern crate mio;
 
-use bytes::{ByteBuf};
 use mio::*;
 use mio::udp::*;
 use std::net::{SocketAddr};
@@ -36,16 +34,16 @@ struct PtpReflectorHandler {
     general_addr   : SocketAddr,
 }
 
-fn vector_map_range_in_place<T,F>(v: &mut Vec<T>, range: Range<usize>, mut f: F)
+fn slice_map_range_in_place<T,F>(s: &mut [T], range: Range<usize>, mut f: F)
   where F: FnMut(&T) -> T {
-    let n = v.len();
+    let n = s.len();
 
     if range.end > n {
         panic!("Invalid range {} > {}", range.end, n);
     }
 
     for i in range {
-        v[i] = f(&v[i]);
+        s[i] = f(&s[i]);
     }
 }
 
@@ -56,7 +54,7 @@ impl PtpReflectorHandler {
         let event_bind_addr = "0.0.0.0:319".parse().unwrap();
         let event_socket = try!(UdpSocket::bound(&event_bind_addr).map_err(|e| e.to_string()));
         try!(event_socket.join_multicast(&multicast_group).map_err(|e|e.to_string()));
-        try!(event_loop.register_opt(&event_socket, SOCKET_EVENT, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
+        try!(event_loop.register(&event_socket, SOCKET_EVENT, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         //let event_addr = SocketAddr::new(multicast_group, 319);
@@ -65,7 +63,7 @@ impl PtpReflectorHandler {
         let general_bind_addr = "0.0.0.0:320".parse().unwrap();
         let general_socket = try!(UdpSocket::bound(&general_bind_addr).map_err(|e| e.to_string()));
         try!(general_socket.join_multicast(&multicast_group).map_err(|e|e.to_string()));
-        try!(event_loop.register_opt(&general_socket, SOCKET_GENERAL, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
+        try!(event_loop.register(&general_socket, SOCKET_GENERAL, EventSet::readable(), PollOpt::level()).map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         //let general_addr = SocketAddr::new(multicast_group, 320);
@@ -95,21 +93,23 @@ impl Handler for PtpReflectorHandler {
             _              => panic!("unexpected token")
         };
 
-        let mut recv_buf = ByteBuf::mut_with_capacity(1024);
+        let msg = &mut [0; 1024];
 
-        match socket.recv_from(&mut recv_buf) {
-            Err(e) => {
+        let length = match socket.recv_from(msg) {
+            Err(e)          => {
                 print!("Error while receiving message: {}\n", e.to_string());
                 return;
             },
-            _      => ()
+            Ok(Some((l,_))) => l,
+            Ok(None)        => {
+                print!("Error while receiving message\n");
+                return;
+            }
         };
 
-        let mut msg = recv_buf.flip().bytes().to_owned();
+        print!("Got message of size {}\n", length);
 
-        print!("Got message of size {}\n", msg.len());
-
-        if msg.len() < 44 {
+        if length < 44 {
             return;
         }
 
@@ -119,12 +119,12 @@ impl Handler for PtpReflectorHandler {
         let forward = match domain {
             0 => {
                 msg[4] = 1;
-                vector_map_range_in_place(&mut msg, 20..28, |&x| x ^ 0xff);
+                slice_map_range_in_place(msg, 20..28, |&x| x ^ 0xff);
 
                 match msg_type {
                     0x0 | 0x08 | 0xb       => true,
                     0x9 if msg.len() >= 54 => {
-                        vector_map_range_in_place(&mut msg, 44..52, |&x| x ^ 0xff);
+                        slice_map_range_in_place(msg, 44..52, |&x| x ^ 0xff);
 
                         true
                     },
@@ -133,7 +133,7 @@ impl Handler for PtpReflectorHandler {
             },
             1 => {
                 msg[4] = 0;
-                vector_map_range_in_place(&mut msg, 20..28, |&x| x ^ 0xff);
+                slice_map_range_in_place(msg, 20..28, |&x| x ^ 0xff);
 
                 match msg_type {
                     0x1 => true,
@@ -144,8 +144,7 @@ impl Handler for PtpReflectorHandler {
         };
 
         if forward {
-            let mut send_buf = ByteBuf::from_slice(&msg);
-            match socket.send_to(&mut send_buf, addr) {
+            match socket.send_to(&msg[..length], addr) {
                 Err(e) => {
                     print!("Error while sending message: {}\n", e.to_string());
                     return;
@@ -153,7 +152,7 @@ impl Handler for PtpReflectorHandler {
                 _      => ()
             };
 
-            print!("Sent message of size {}\n", msg.len());
+            print!("Sent message of size {}\n", length);
         }
     }
 }
