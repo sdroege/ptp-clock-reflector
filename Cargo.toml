@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Sebastian Dröge <sebastian@centricular.com>"]
 
 [dependencies]
-mio = "0.5.0"
+mio = "0.5"
 
 #[dependencies.mio]
 #git = "https://github.com/carllerche/mio"
