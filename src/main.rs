@@ -105,17 +105,17 @@ impl Handler for PtpReflectorHandler {
 
         let length = match socket.recv_from(msg) {
             Err(e) => {
-                print!("Error while receiving message: {}\n", e.to_string());
+                println!("Error while receiving message: {}", e.to_string());
                 return;
             }
             Ok(Some((l, _))) => l,
             Ok(None) => {
-                print!("Error while receiving message\n");
+                println!("Error while receiving message");
                 return;
             }
         };
 
-        print!("Got message of size {}\n", length);
+        println!("Got message of size {}", length);
 
         if length < 44 {
             return;
@@ -152,15 +152,12 @@ impl Handler for PtpReflectorHandler {
         };
 
         if forward {
-            match socket.send_to(&msg[..length], addr) {
-                Err(e) => {
-                    print!("Error while sending message: {}\n", e.to_string());
-                    return;
-                }
-                _ => (),
+            if let Err(e) = socket.send_to(&msg[..length], addr) {
+                println!("Error while sending message: {}", e.to_string());
+                return;
             };
 
-            print!("Sent message of size {}\n", length);
+            println!("Sent message of size {}", length);
         }
     }
 }
