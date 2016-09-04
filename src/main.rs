@@ -26,7 +26,8 @@ use std::ops::Range;
 const SOCKET_EVENT: Token = Token(0);
 const SOCKET_GENERAL: Token = Token(1);
 
-struct PtpReflectorHandler {
+struct PtpReflector {
+    poll: Poll,
     event_socket: UdpSocket,
     event_addr: SocketAddr,
     general_socket: UdpSocket,
@@ -47,8 +48,10 @@ fn slice_map_range_in_place<T, F>(s: &mut [T], range: Range<usize>, mut f: F)
     }
 }
 
-impl PtpReflectorHandler {
-    fn new(poll: &mut Poll) -> Result<PtpReflectorHandler, String> {
+impl PtpReflector {
+    fn new() -> Result<PtpReflector, String> {
+        let poll = try!(Poll::new().map_err(|e| e.to_string()));
+
         let multicast_group = "224.0.1.129".parse().unwrap();
         let any_addr = "0.0.0.0".parse().unwrap();
 
@@ -80,7 +83,8 @@ impl PtpReflectorHandler {
         // let general_addr = SocketAddr::new(multicast_group, 320);
         let general_addr = "224.0.1.129:320".parse().unwrap();
 
-        Ok(PtpReflectorHandler {
+        Ok(PtpReflector {
+            poll: poll,
             event_socket: event_socket,
             event_addr: event_addr,
             general_socket: general_socket,
@@ -88,7 +92,7 @@ impl PtpReflectorHandler {
         })
     }
 
-    fn ready(&mut self, event: &Event) {
+    fn ready(&self, event: &Event) {
         if !event.kind().is_readable() {
             return;
         }
@@ -158,21 +162,22 @@ impl PtpReflectorHandler {
             println!("Sent message of size {}", length);
         }
     }
-}
 
-fn main() {
-    let mut poll = Poll::new().unwrap();
-    let res = PtpReflectorHandler::new(&mut poll).and_then(|mut handler| {
+    fn run(&self) -> Result<(), String> {
         let mut events = Events::with_capacity(1024);
 
         loop {
-            try!(poll.poll(&mut events, None).or_else(|err| Err(err.to_string())));
+            try!(self.poll.poll(&mut events, None).or_else(|err| Err(err.to_string())));
 
             for event in events.iter() {
-                handler.ready(&event);
+                self.ready(&event);
             }
         }
-    });
+    }
+}
+
+fn main() {
+    let res = PtpReflector::new().and_then(|handler| handler.run());
 
     match res {
         Ok(()) => (),
