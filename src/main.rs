@@ -48,15 +48,17 @@ fn slice_map_range_in_place<T, F>(s: &mut [T], range: Range<usize>, mut f: F)
 }
 
 impl PtpReflectorHandler {
-    fn new(event_loop: &mut EventLoop<PtpReflectorHandler>) -> Result<PtpReflectorHandler, String> {
+    fn new(poll: &mut Poll) -> Result<PtpReflectorHandler, String> {
         let multicast_group = "224.0.1.129".parse().unwrap();
+        let any_addr = "0.0.0.0".parse().unwrap();
 
         let event_bind_addr = "0.0.0.0:319".parse().unwrap();
-        let event_socket = try!(UdpSocket::bound(&event_bind_addr).map_err(|e| e.to_string()));
-        try!(event_socket.join_multicast(&multicast_group).map_err(|e| e.to_string()));
-        try!(event_loop.register(&event_socket,
+        let event_socket = try!(UdpSocket::bind(&event_bind_addr).map_err(|e| e.to_string()));
+        try!(event_socket.join_multicast_v4(&multicast_group, &any_addr)
+            .map_err(|e| e.to_string()));
+        try!(poll.register(&event_socket,
                       SOCKET_EVENT,
-                      EventSet::readable(),
+                      Ready::readable(),
                       PollOpt::level())
             .map_err(|e| e.to_string()));
 
@@ -65,11 +67,12 @@ impl PtpReflectorHandler {
         let event_addr = "224.0.1.129:319".parse().unwrap();
 
         let general_bind_addr = "0.0.0.0:320".parse().unwrap();
-        let general_socket = try!(UdpSocket::bound(&general_bind_addr).map_err(|e| e.to_string()));
-        try!(general_socket.join_multicast(&multicast_group).map_err(|e| e.to_string()));
-        try!(event_loop.register(&general_socket,
+        let general_socket = try!(UdpSocket::bind(&general_bind_addr).map_err(|e| e.to_string()));
+        try!(general_socket.join_multicast_v4(&multicast_group, &any_addr)
+            .map_err(|e| e.to_string()));
+        try!(poll.register(&general_socket,
                       SOCKET_GENERAL,
-                      EventSet::readable(),
+                      Ready::readable(),
                       PollOpt::level())
             .map_err(|e| e.to_string()));
 
@@ -84,21 +87,16 @@ impl PtpReflectorHandler {
             general_addr: general_addr,
         })
     }
-}
 
-impl Handler for PtpReflectorHandler {
-    type Timeout = usize;
-    type Message = ();
-
-    fn ready(&mut self, _: &mut EventLoop<PtpReflectorHandler>, token: Token, events: EventSet) {
-        if !events.is_readable() {
+    fn ready(&mut self, event: &Event) {
+        if !event.kind().is_readable() {
             return;
         }
 
-        let (socket, addr) = match token {
+        let (socket, addr) = match event.token() {
             SOCKET_EVENT => (&self.event_socket, &self.event_addr),
             SOCKET_GENERAL => (&self.general_socket, &self.general_addr),
-            _ => panic!("unexpected token"),
+            _ => unreachable!(),
         };
 
         let msg = &mut [0; 1024];
@@ -163,16 +161,21 @@ impl Handler for PtpReflectorHandler {
 }
 
 fn main() {
-    let mut event_loop = EventLoop::new().unwrap();
-    let res = PtpReflectorHandler::new(&mut event_loop)
-        .map_err(|e| e.to_string())
-        .and_then(|mut handler| {
-            event_loop.run(&mut handler)
-                .map_err(|e| e.to_string())
-        });
+    let mut poll = Poll::new().unwrap();
+    let res = PtpReflectorHandler::new(&mut poll).and_then(|mut handler| {
+        let mut events = Events::with_capacity(1024);
+
+        loop {
+            try!(poll.poll(&mut events, None).or_else(|err| Err(err.to_string())));
+
+            for event in events.iter() {
+                handler.ready(&event);
+            }
+        }
+    });
 
     match res {
-        Ok(_) => (),
+        Ok(()) => (),
         Err(s) => panic!(s),
     };
 }
