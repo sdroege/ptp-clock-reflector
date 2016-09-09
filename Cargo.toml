@@ -5,4 +5,5 @@ authors = ["Sebastian Dröge <sebastian@centricular.com>"]
 
 [dependencies]
 mio = "0.6"
-
+futures = { git = "https://github.com/alexcrichton/futures-rs" }
+tokio-core = { git = "https://github.com/tokio-rs/tokio-core.git" }

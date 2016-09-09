@@ -16,22 +16,26 @@
 // Boston, MA 02110-1301, USA.
 //
 
-extern crate mio;
+#[macro_use]
+extern crate futures;
+#[macro_use]
+extern crate tokio_core;
 
-use mio::*;
-use mio::udp::*;
-use std::net::SocketAddr;
+use std::io;
+use futures::*;
+use tokio_core::reactor::*;
+use tokio_core::net::UdpSocket;
+
+use std::net::{SocketAddr, Ipv4Addr, SocketAddrV4};
 use std::ops::Range;
 
-const SOCKET_EVENT: Token = Token(0);
-const SOCKET_GENERAL: Token = Token(1);
+struct PtpReflector;
 
-struct PtpReflector {
-    poll: Poll,
-    event_socket: UdpSocket,
-    event_addr: SocketAddr,
-    general_socket: UdpSocket,
-    general_addr: SocketAddr,
+struct PtpSocket {
+    socket: UdpSocket,
+    addr: SocketAddr,
+    handle: Handle,
+    buf: [u8; 1024],
 }
 
 fn slice_map_range_in_place<T, F>(s: &mut [T], range: Range<usize>, mut f: F)
@@ -48,80 +52,34 @@ fn slice_map_range_in_place<T, F>(s: &mut [T], range: Range<usize>, mut f: F)
     }
 }
 
-impl PtpReflector {
-    fn new() -> Result<PtpReflector, String> {
-        let poll = try!(Poll::new().map_err(|e| e.to_string()));
+impl PtpSocket {
+    fn new(port: u16, handle: Handle) -> Result<PtpSocket, String> {
+        let any_addr = Ipv4Addr::new(0, 0, 0, 0);
+        let multicast_group = Ipv4Addr::new(224, 0, 1, 129);
+        let bind_addr = SocketAddr::V4(SocketAddrV4::new(any_addr, port));
 
-        let multicast_group = "224.0.1.129".parse().unwrap();
-        let any_addr = "0.0.0.0".parse().unwrap();
-
-        let event_bind_addr = "0.0.0.0:319".parse().unwrap();
-        let event_socket = try!(UdpSocket::bind(&event_bind_addr).map_err(|e| e.to_string()));
-        try!(event_socket.join_multicast_v4(&multicast_group, &any_addr)
-            .map_err(|e| e.to_string()));
-        try!(poll.register(&event_socket,
-                      SOCKET_EVENT,
-                      Ready::readable(),
-                      PollOpt::level())
+        let socket = try!(UdpSocket::bind(&bind_addr, &handle).map_err(|e| e.to_string()));
+        try!(socket.join_multicast_v4(&multicast_group, &any_addr)
             .map_err(|e| e.to_string()));
 
-        // FIXME: How can we create this from the multicast group?
-        // let event_addr = SocketAddr::new(multicast_group, 319);
-        let event_addr = "224.0.1.129:319".parse().unwrap();
+        let addr = SocketAddr::V4(SocketAddrV4::new(multicast_group, port));
 
-        let general_bind_addr = "0.0.0.0:320".parse().unwrap();
-        let general_socket = try!(UdpSocket::bind(&general_bind_addr).map_err(|e| e.to_string()));
-        try!(general_socket.join_multicast_v4(&multicast_group, &any_addr)
-            .map_err(|e| e.to_string()));
-        try!(poll.register(&general_socket,
-                      SOCKET_GENERAL,
-                      Ready::readable(),
-                      PollOpt::level())
-            .map_err(|e| e.to_string()));
-
-        // FIXME: How can we create this from the multicast group?
-        // let general_addr = SocketAddr::new(multicast_group, 320);
-        let general_addr = "224.0.1.129:320".parse().unwrap();
-
-        Ok(PtpReflector {
-            poll: poll,
-            event_socket: event_socket,
-            event_addr: event_addr,
-            general_socket: general_socket,
-            general_addr: general_addr,
+        Ok(PtpSocket {
+            socket: socket,
+            addr: addr,
+            handle: handle,
+            buf: [0; 1024],
         })
     }
 
-    fn ready(&self, event: &Event) {
-        if !event.kind().is_readable() {
-            return;
-        }
-
-        let (socket, addr) = match event.token() {
-            SOCKET_EVENT => (&self.event_socket, &self.event_addr),
-            SOCKET_GENERAL => (&self.general_socket, &self.general_addr),
-            _ => unreachable!(),
-        };
-
-        let msg = &mut [0; 1024];
-
-        let length = match socket.recv_from(msg) {
-            Err(e) => {
-                println!("Error while receiving message: {}", e.to_string());
-                return;
-            }
-            Ok(Some((l, _))) => l,
-            Ok(None) => {
-                println!("Error while receiving message");
-                return;
-            }
-        };
-
+    fn handle_packet(&mut self, length: usize, addr: &SocketAddr) {
         println!("Got message of size {}", length);
 
         if length < 44 {
             return;
         }
+
+        let msg = &mut self.buf;
 
         let domain = msg[4];
         let msg_type = msg[0] & 0x0f;
@@ -154,7 +112,7 @@ impl PtpReflector {
         };
 
         if forward {
-            if let Err(e) = socket.send_to(&msg[..length], addr) {
+            if let Err(e) = self.socket.send_to(msg, addr) {
                 println!("Error while sending message: {}", e.to_string());
                 return;
             };
@@ -162,25 +120,33 @@ impl PtpReflector {
             println!("Sent message of size {}", length);
         }
     }
+}
 
-    fn run(&self) -> Result<(), String> {
-        let mut events = Events::with_capacity(1024);
+impl Future for PtpSocket {
+    type Item = ();
+    type Error = io::Error;
 
+    fn poll(&mut self) -> Poll<(), io::Error> {
         loop {
-            try!(self.poll.poll(&mut events, None).or_else(|err| Err(err.to_string())));
+            let (n, addr) = try_nb!(self.socket.recv_from(&mut self.buf));
 
-            for event in events.iter() {
-                self.ready(&event);
-            }
+            println!("read {:?}", self.addr);
+            self.handle_packet(n, &addr);
         }
     }
 }
 
-fn main() {
-    let res = PtpReflector::new().and_then(|handler| handler.run());
+impl PtpReflector {
+    fn run() -> Result<(), String> {
+        let mut l = try!(Core::new().map_err(|e| e.to_string()));
 
-    match res {
-        Ok(()) => (),
-        Err(s) => panic!(s),
-    };
+        let event_socket = try!(PtpSocket::new(319, l.handle()).map_err(|e| e.to_string()));
+        let general_socket = try!(PtpSocket::new(320, l.handle()).map_err(|e| e.to_string()));
+
+        l.run(event_socket.select(general_socket)).map(|_| ()).map_err(|e| e.0.to_string())
+    }
+}
+
+fn main() {
+    PtpReflector::run().unwrap();
 }
