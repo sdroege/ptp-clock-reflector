@@ -19,7 +19,7 @@
 extern crate mio;
 
 use mio::*;
-use mio::udp::*;
+use mio::net::*;
 use std::net::SocketAddr;
 use std::ops::Range;
 
@@ -93,7 +93,7 @@ impl PtpReflector {
     }
 
     fn ready(&self, event: &Event) {
-        if !event.kind().is_readable() {
+        if !event.readiness().is_readable() {
             return;
         }
 
@@ -110,11 +110,7 @@ impl PtpReflector {
                 println!("Error while receiving message: {}", e.to_string());
                 return;
             }
-            Ok(Some((l, _))) => l,
-            Ok(None) => {
-                println!("Error while receiving message");
-                return;
-            }
+            Ok((l, _)) => l,
         };
 
         println!("Got message of size {}", length);
