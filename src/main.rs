@@ -57,13 +57,14 @@ impl PtpReflector {
 
         let event_bind_addr = "0.0.0.0:319".parse().unwrap();
         let event_socket = try!(UdpSocket::bind(&event_bind_addr).map_err(|e| e.to_string()));
-        try!(event_socket.join_multicast_v4(&multicast_group, &any_addr)
-            .map_err(|e| e.to_string()));
+        try!(event_socket
+                 .join_multicast_v4(&multicast_group, &any_addr)
+                 .map_err(|e| e.to_string()));
         try!(poll.register(&event_socket,
-                      SOCKET_EVENT,
-                      Ready::readable(),
-                      PollOpt::level())
-            .map_err(|e| e.to_string()));
+                           SOCKET_EVENT,
+                           Ready::readable(),
+                           PollOpt::level())
+                 .map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         // let event_addr = SocketAddr::new(multicast_group, 319);
@@ -71,25 +72,26 @@ impl PtpReflector {
 
         let general_bind_addr = "0.0.0.0:320".parse().unwrap();
         let general_socket = try!(UdpSocket::bind(&general_bind_addr).map_err(|e| e.to_string()));
-        try!(general_socket.join_multicast_v4(&multicast_group, &any_addr)
-            .map_err(|e| e.to_string()));
+        try!(general_socket
+                 .join_multicast_v4(&multicast_group, &any_addr)
+                 .map_err(|e| e.to_string()));
         try!(poll.register(&general_socket,
-                      SOCKET_GENERAL,
-                      Ready::readable(),
-                      PollOpt::level())
-            .map_err(|e| e.to_string()));
+                           SOCKET_GENERAL,
+                           Ready::readable(),
+                           PollOpt::level())
+                 .map_err(|e| e.to_string()));
 
         // FIXME: How can we create this from the multicast group?
         // let general_addr = SocketAddr::new(multicast_group, 320);
         let general_addr = "224.0.1.129:320".parse().unwrap();
 
         Ok(PtpReflector {
-            poll: poll,
-            event_socket: event_socket,
-            event_addr: event_addr,
-            general_socket: general_socket,
-            general_addr: general_addr,
-        })
+               poll: poll,
+               event_socket: event_socket,
+               event_addr: event_addr,
+               general_socket: general_socket,
+               general_addr: general_addr,
+           })
     }
 
     fn ready(&self, event: &Event) {
@@ -163,7 +165,9 @@ impl PtpReflector {
         let mut events = Events::with_capacity(1024);
 
         loop {
-            try!(self.poll.poll(&mut events, None).or_else(|err| Err(err.to_string())));
+            try!(self.poll
+                     .poll(&mut events, None)
+                     .or_else(|err| Err(err.to_string())));
 
             for event in events.iter() {
                 self.ready(&event);
